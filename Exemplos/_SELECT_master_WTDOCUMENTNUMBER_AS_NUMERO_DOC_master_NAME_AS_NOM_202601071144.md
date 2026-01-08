@@ -1,0 +1,5 @@
+|NUMERO_DOC|NOME_DOC|VERSAO|ITERACAO|ESTADO_LIFECYCLE|NOME_ARQUIVO|TAMANHO_MB|TIPO_CONTEUDO|DATA_CRIACAO|DATA_MODIFICACAO|CRIADO_POR|CAMINHO_COMPLETO_ESTIMADO|
+|----------|--------|------|--------|----------------|------------|----------|-------------|------------|----------------|----------|-------------------------|
+|0000004499|A0-588-99-13-0002-0-0 R2|A|1|INWORK|A0-588-99-13-0002-0-0 R2.pdf|0.78|PRIMARY|20/12/2021 00:00:00|20/12/2021 00:00:00||E:\PTC\Windchill\vaults\defaultcachevault2\E45838.fv|
+|0000004499|A0-588-99-13-0002-0-0 R2|A|1|INWORK|A0-588-99-13-0002-0-0 R2.pdf|0.78|PRIMARY|20/12/2021 00:00:00|20/12/2021 00:00:00||E:\PTC\Windchill\vaults\defaultcachevault2\E45838.fv|
+|0000004499|A0-588-99-13-0002-0-0 R2|A|1|INWORK|A0-588-99-13-0002-0-0 R2.pdf|0.78|PRIMARY|20/12/2021 00:00:00|20/12/2021 00:00:00||E:\PTC\Windchill\vaults\defaultcachevault2\E45838.fv|

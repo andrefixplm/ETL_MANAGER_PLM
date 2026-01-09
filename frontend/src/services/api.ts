@@ -93,6 +93,8 @@ export const getDocumentos = (params?: {
   versao?: string;
   criado_por?: string;
   busca?: string;
+  order_by?: string;
+  order_dir?: 'asc' | 'desc';
   skip?: number;
   limit?: number;
 }) => api.get<PaginatedResponse<Documento>>('/documentos', { params });
@@ -105,6 +107,8 @@ export const getArquivos = (params?: {
   tipo_doc?: string;
   nome_interno?: string;
   nome_hex?: string;
+  order_by?: string;
+  order_dir?: 'asc' | 'desc';
   skip?: number;
   limit?: number;
 }) => api.get<PaginatedResponse<Arquivo>>('/arquivos', { params });

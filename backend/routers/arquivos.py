@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, func
-from typing import List, Optional
+from sqlalchemy import or_, func, asc, desc
+from typing import List, Optional, Literal
 import math
 from database import get_db
 from models import Arquivo
@@ -12,6 +12,17 @@ router = APIRouter(
     tags=["arquivos"]
 )
 
+# Colunas válidas para ordenação
+SORTABLE_COLUMNS = {
+    'id': Arquivo.id,
+    'nome_arquivo': Arquivo.nome_arquivo,
+    'nome_original': Arquivo.nome_original,
+    'tipo_doc': Arquivo.tipo_doc,
+    'nome_interno_app': Arquivo.nome_interno_app,
+    'nome_hex': Arquivo.nome_hex,
+    'tamanho_mb': Arquivo.tamanho_mb,
+}
+
 @router.get("", response_model=ArquivosPaginados)
 def listar_arquivos(
     nome: Optional[str] = None,
@@ -19,11 +30,13 @@ def listar_arquivos(
     tipo_doc: Optional[str] = None,
     nome_interno: Optional[str] = None,
     nome_hex: Optional[str] = None,
+    order_by: Optional[str] = Query(None, description="Coluna para ordenação"),
+    order_dir: Optional[str] = Query("asc", description="Direção: asc ou desc"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    """Lista arquivos com filtros opcionais e paginação."""
+    """Lista arquivos com filtros, ordenação e paginação."""
     query = db.query(Arquivo)
 
     # Filtros individuais
@@ -43,8 +56,19 @@ def listar_arquivos(
     if nome_hex:
         query = query.filter(Arquivo.nome_hex.ilike(f"%{nome_hex}%"))
 
-    # Contagem total (antes de aplicar paginação)
+    # Contagem total (antes de aplicar ordenação e paginação)
     total = query.count()
+
+    # Aplicar ordenação
+    if order_by and order_by in SORTABLE_COLUMNS:
+        column = SORTABLE_COLUMNS[order_by]
+        if order_dir == "desc":
+            query = query.order_by(desc(column))
+        else:
+            query = query.order_by(asc(column))
+    else:
+        # Ordenação padrão por ID
+        query = query.order_by(Arquivo.id)
 
     # Aplicar paginação
     items = query.offset(skip).limit(limit).all()

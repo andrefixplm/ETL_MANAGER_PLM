@@ -2,14 +2,58 @@ import { StatusBadge } from './StatusBadge';
 import { FileIcon } from './FileIcon';
 import type { Documento, Arquivo } from '../services/api';
 
+export interface SortConfig {
+  column: string;
+  direction: 'asc' | 'desc';
+}
+
 interface ItemsTableProps {
   docs: Documento[];
   files: Arquivo[];
   selectedItems: number[];
   loading: boolean;
+  sortConfig?: SortConfig;
   onSelectItem: (id: number, checked: boolean) => void;
   onSelectAll: (checked: boolean) => void;
   onViewItem: (id: number) => void;
+  onSort?: (column: string) => void;
+}
+
+interface SortableHeaderProps {
+  column: string;
+  label: string;
+  sortConfig?: SortConfig;
+  onSort?: (column: string) => void;
+  className?: string;
+}
+
+function SortableHeader({ column, label, sortConfig, onSort, className = '' }: SortableHeaderProps) {
+  const isActive = sortConfig?.column === column;
+  const direction = isActive ? sortConfig.direction : null;
+
+  const handleClick = () => {
+    if (onSort) {
+      onSort(column);
+    }
+  };
+
+  return (
+    <th
+      className={`p-4 font-semibold cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors select-none ${className}`}
+      onClick={handleClick}
+    >
+      <div className="flex items-center gap-1">
+        <span>{label}</span>
+        <span className="material-icons-outlined text-sm">
+          {isActive ? (
+            direction === 'asc' ? 'arrow_upward' : 'arrow_downward'
+          ) : (
+            'unfold_more'
+          )}
+        </span>
+      </div>
+    </th>
+  );
 }
 
 export function ItemsTable({
@@ -17,9 +61,11 @@ export function ItemsTable({
   files,
   selectedItems,
   loading,
+  sortConfig,
   onSelectItem,
   onSelectAll,
   onViewItem,
+  onSort,
 }: ItemsTableProps) {
   if (loading) {
     return (
@@ -40,12 +86,42 @@ export function ItemsTable({
               className="rounded border-gray-300 text-primary focus:ring-primary h-4 w-4"
             />
           </th>
-          <th className="p-4 font-semibold">Identificação</th>
-          <th className="p-4 font-semibold">Nome Original</th>
-          <th className="p-4 font-semibold">Nome Interno</th>
-          <th className="p-4 font-semibold">Versão</th>
-          <th className="p-4 font-semibold">Tipo</th>
-          <th className="p-4 font-semibold">Status</th>
+          <SortableHeader
+            column="nome_hex"
+            label="Identificação"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
+          <SortableHeader
+            column="nome_original"
+            label="Nome Original"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
+          <SortableHeader
+            column="nome_interno_app"
+            label="Nome Interno"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
+          <SortableHeader
+            column="versao"
+            label="Versão"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
+          <SortableHeader
+            column="tipo_doc"
+            label="Tipo"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
+          <SortableHeader
+            column="estado"
+            label="Status"
+            sortConfig={sortConfig}
+            onSort={onSort}
+          />
           <th className="p-4 font-semibold text-right">Ações</th>
         </tr>
       </thead>
@@ -134,7 +210,7 @@ export function ItemsTable({
         ))}
         {docs.length === 0 && files.length === 0 && (
           <tr>
-            <td colSpan={7} className="p-8 text-center text-text-muted-light dark:text-text-muted-dark">
+            <td colSpan={8} className="p-8 text-center text-text-muted-light dark:text-text-muted-dark">
               Nenhum registro encontrado
             </td>
           </tr>

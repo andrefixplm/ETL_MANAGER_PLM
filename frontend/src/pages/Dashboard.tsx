@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StatsCard } from '../components/StatsCard';
 import { ImportModal } from '../components/ImportModal';
-import { ItemsTable } from '../components/ItemsTable';
+import { ItemsTable, type SortConfig } from '../components/ItemsTable';
 import { Pagination } from '../components/Pagination';
 import { getStats, getDocumentos, getArquivos, restoreFiles, verifyIntegrity, getConfiguracoes, type Stats, type Documento, type Arquivo } from '../services/api';
 import { AdvancedFilter, type FilterCondition } from '../components/AdvancedFilter';
@@ -39,6 +39,12 @@ export function Dashboard() {
     searchTerm: '',
     estado: '',
     advancedFilters: []
+  });
+
+  // Sort state
+  const [sortConfig, setSortConfig] = useState<SortConfig>({
+    column: 'id',
+    direction: 'asc'
   });
 
   // Build backend params from filters
@@ -91,8 +97,14 @@ export function Dashboard() {
       }
     });
 
+    // Sorting
+    if (sortConfig.column) {
+      params.order_by = sortConfig.column;
+      params.order_dir = sortConfig.direction;
+    }
+
     return params;
-  }, [page, pageSize, filters, activeTab]);
+  }, [page, pageSize, filters, activeTab, sortConfig]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -242,6 +254,13 @@ export function Dashboard() {
       advancedFilters: []
     });
     setShowAdvancedFilter(false);
+  };
+
+  const handleSort = (column: string) => {
+    setSortConfig(prev => ({
+      column,
+      direction: prev.column === column && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
   };
 
   const getDisplayData = () => {
@@ -476,9 +495,11 @@ export function Dashboard() {
             files={files}
             selectedItems={selectedItems}
             loading={loading}
+            sortConfig={sortConfig}
             onSelectItem={handleSelectItem}
             onSelectAll={handleSelectAll}
             onViewItem={(id) => navigate(`/arquivo/${id}`)}
+            onSort={handleSort}
           />
         </div>
 

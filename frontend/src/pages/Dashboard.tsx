@@ -213,6 +213,11 @@ export function Dashboard() {
     fetchData();
   }, [fetchData]);
 
+  // Refetch when sort changes
+  useEffect(() => {
+    fetchData();
+  }, [sortConfig]);
+
   // Reset page when filters or tab change
   useEffect(() => {
     setPage(1);

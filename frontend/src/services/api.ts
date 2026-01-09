@@ -74,6 +74,15 @@ export interface VerifyResponse {
   message: string;
 }
 
+// Paginated Response Types
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+}
+
 // API Functions
 export const getStats = () => api.get<Stats>('/stats');
 
@@ -81,19 +90,24 @@ export const getDocumentos = (params?: {
   numero_doc?: string;
   nome_doc?: string;
   estado?: string;
+  versao?: string;
+  criado_por?: string;
+  busca?: string;
   skip?: number;
   limit?: number;
-}) => api.get<Documento[]>('/documentos', { params });
+}) => api.get<PaginatedResponse<Documento>>('/documentos', { params });
 
 export const getDocumento = (id: number) => api.get<Documento>(`/documentos/${id}`);
 
 export const getArquivos = (params?: {
   nome?: string;
+  nome_original?: string;
   tipo_doc?: string;
   nome_interno?: string;
+  nome_hex?: string;
   skip?: number;
   limit?: number;
-}) => api.get<Arquivo[]>('/arquivos', { params });
+}) => api.get<PaginatedResponse<Arquivo>>('/arquivos', { params });
 
 export const getArquivo = (id: number) => api.get<Arquivo>(`/arquivos/${id}`);
 

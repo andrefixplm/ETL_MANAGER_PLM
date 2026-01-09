@@ -1,12 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { StatsCard } from '../components/StatsCard';
 import { ImportModal } from '../components/ImportModal';
 import { ItemsTable } from '../components/ItemsTable';
+import { Pagination } from '../components/Pagination';
 import { getStats, getDocumentos, getArquivos, restoreFiles, verifyIntegrity, getConfiguracoes, type Stats, type Documento, type Arquivo } from '../services/api';
 import { AdvancedFilter, type FilterCondition } from '../components/AdvancedFilter';
 
 type TabType = 'todos' | 'documentos' | 'arquivos';
+
+interface FilterState {
+  searchTerm: string;
+  estado: string;
+  advancedFilters: FilterCondition[];
+}
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -14,71 +21,125 @@ export function Dashboard() {
   const [documentos, setDocumentos] = useState<Documento[]>([]);
   const [arquivos, setArquivos] = useState<Arquivo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('todos');
-  const [searchTerm, setSearchTerm] = useState('');
   const [selectedItems, setSelectedItems] = useState<number[]>([]);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showAdvancedFilter, setShowAdvancedFilter] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<FilterCondition[]>([]);
   const [defaultDestino, setDefaultDestino] = useState('C:\\Export');
+
+  // Pagination state
   const [page, setPage] = useState(1);
   const [pageSize] = useState(50);
-  const [totalItems, setTotalItems] = useState(0);
+  const [totalDocs, setTotalDocs] = useState(0);
+  const [totalFiles, setTotalFiles] = useState(0);
 
-  const fetchData = async () => {
+  // Filter state
+  const [filters, setFilters] = useState<FilterState>({
+    searchTerm: '',
+    estado: '',
+    advancedFilters: []
+  });
+
+  // Build backend params from filters
+  const buildFilterParams = useCallback((type: 'documentos' | 'arquivos') => {
+    const params: Record<string, string | number | undefined> = {
+      skip: (page - 1) * pageSize,
+      limit: pageSize
+    };
+
+    // Basic search term
+    if (filters.searchTerm) {
+      if (type === 'documentos') {
+        params.busca = filters.searchTerm;
+      } else {
+        params.nome = filters.searchTerm;
+      }
+    }
+
+    // Estado filter (documentos only)
+    if (filters.estado && type === 'documentos') {
+      params.estado = filters.estado;
+    }
+
+    // Advanced filters
+    filters.advancedFilters.forEach(f => {
+      if (!f.value.trim()) return;
+
+      // Map frontend field names to backend param names
+      const fieldMapping: Record<string, { doc?: string; arq?: string }> = {
+        'nome_arquivo': { arq: 'nome' },
+        'nome_original': { arq: 'nome_original' },
+        'nome_interno_app': { arq: 'nome_interno' },
+        'tipo_doc': { doc: 'nome_doc', arq: 'tipo_doc' },
+        'numero_doc': { doc: 'numero_doc' }
+      };
+
+      const mapping = fieldMapping[f.field];
+      if (mapping) {
+        const paramKey = type === 'documentos' ? mapping.doc : mapping.arq;
+        if (paramKey) {
+          params[paramKey] = f.value;
+        }
+      }
+    });
+
+    return params;
+  }, [page, pageSize, filters]);
+
+  const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
+
     try {
-      const skip = (page - 1) * pageSize;
-
-      const configRes = await getConfiguracoes(); // Get config first
-
-      let docsData: Documento[] = [];
-      let filesData: Arquivo[] = [];
-      let totalDocs = 0;
-      let totalFiles = 0;
-
-      if (activeTab === 'todos' || activeTab === 'documentos') {
-        const docsRes = await getDocumentos({ skip, limit: pageSize });
-        docsData = docsRes.data;
-      }
-
-      if (activeTab === 'todos' || activeTab === 'arquivos') {
-        // Map advanced filters to backend params
-        const params: any = { skip, limit: pageSize };
-
-        // Basic search term override if present
-        if (searchTerm) params.nome = searchTerm;
-
-        // Apply advanced filters (simplified mapping)
-        activeFilters.forEach(f => {
-          if (f.field === 'nome_interno_app' && (f.operator === 'contains' || f.operator === 'equals')) {
-            params.nome_interno = f.value;
-          }
-          if (f.field === 'nome_arquivo' && f.operator === 'contains') {
-            params.nome = f.value;
-          }
-        });
-
-        const filesRes = await getArquivos(params);
-        filesData = filesRes.data;
-      }
-
-      const statsRes = await getStats();
-      setStats(statsRes.data);
-      setTotalItems((statsRes.data.total_documentos + statsRes.data.total_arquivos)); // Aproximação, ideal seria count do endpoint
-
-      setDocumentos(docsData);
-      setArquivos(filesData);
-
+      // Fetch config
+      const configRes = await getConfiguracoes();
       if (configRes.data.destino_padrao) {
         setDefaultDestino(configRes.data.destino_padrao);
       }
-    } catch (error) {
-      console.error('Error fetching data:', error);
+
+      // Fetch data based on active tab
+      if (activeTab === 'todos' || activeTab === 'documentos') {
+        try {
+          const docsRes = await getDocumentos(buildFilterParams('documentos'));
+          setDocumentos(docsRes.data.items);
+          setTotalDocs(docsRes.data.total);
+        } catch (err) {
+          console.error('Error fetching documentos:', err);
+          setDocumentos([]);
+          setTotalDocs(0);
+        }
+      } else {
+        setDocumentos([]);
+        setTotalDocs(0);
+      }
+
+      if (activeTab === 'todos' || activeTab === 'arquivos') {
+        try {
+          const filesRes = await getArquivos(buildFilterParams('arquivos'));
+          setArquivos(filesRes.data.items);
+          setTotalFiles(filesRes.data.total);
+        } catch (err) {
+          console.error('Error fetching arquivos:', err);
+          setArquivos([]);
+          setTotalFiles(0);
+        }
+      } else {
+        setArquivos([]);
+        setTotalFiles(0);
+      }
+
+      // Fetch stats
+      const statsRes = await getStats();
+      setStats(statsRes.data);
+
+    } catch (err) {
+      console.error('Error fetching data:', err);
+      setError('Erro ao carregar dados. Verifique a conexão com o servidor.');
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, buildFilterParams]);
 
   const handleBatchRestore = async () => {
     if (selectedItems.length === 0) return;
@@ -92,12 +153,12 @@ export function Dashboard() {
 
       if (success) {
         alert(message);
-        setSelectedItems([]); // Limpa seleção
+        setSelectedItems([]);
       } else {
         alert(`Erro parcial:\n${message}\n\nErros:\n${erros.join('\n')}`);
       }
-    } catch (error) {
-      console.error('Erro na restauração:', error);
+    } catch (err) {
+      console.error('Erro na restauração:', err);
       alert('Falha ao iniciar restauração.');
     }
   };
@@ -116,15 +177,13 @@ export function Dashboard() {
 
       if (total_falhas > 0) {
         report += `\n\nConsulte os Logs para detalhes dos itens ausentes.`;
-        // Futuramente abrir modal de relatório
       }
 
       alert(report);
-      // Atualizar stats ou logs se necessário
       fetchData();
 
-    } catch (error) {
-      console.error('Erro na verificação:', error);
+    } catch (err) {
+      console.error('Erro na verificação:', err);
       alert('Falha ao executar verificação.');
     } finally {
       setLoading(false);
@@ -133,7 +192,12 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [page, activeTab, activeFilters]); // Re-fetch on page or tab change
+  }, [fetchData]);
+
+  // Reset page when filters or tab change
+  useEffect(() => {
+    setPage(1);
+  }, [activeTab, filters.searchTerm, filters.estado, filters.advancedFilters]);
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -152,28 +216,66 @@ export function Dashboard() {
     }
   };
 
-  const filteredDocumentos = documentos.filter(
-    d => d.numero_doc.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      d.nome_doc.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleSearchChange = (value: string) => {
+    setFilters(prev => ({ ...prev, searchTerm: value }));
+  };
 
-  const filteredArquivos = arquivos.filter(
-    a => a.nome_arquivo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (a.nome_original && a.nome_original.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const handleEstadoChange = (value: string) => {
+    setFilters(prev => ({ ...prev, estado: value }));
+  };
+
+  const handleAdvancedFilterChange = (newFilters: FilterCondition[]) => {
+    setFilters(prev => ({ ...prev, advancedFilters: newFilters }));
+  };
+
+  const clearAllFilters = () => {
+    setFilters({
+      searchTerm: '',
+      estado: '',
+      advancedFilters: []
+    });
+    setShowAdvancedFilter(false);
+  };
 
   const getDisplayData = () => {
     switch (activeTab) {
       case 'documentos':
-        return { docs: filteredDocumentos, files: [] };
+        return { docs: documentos, files: [] };
       case 'arquivos':
-        return { docs: [], files: filteredArquivos };
+        return { docs: [], files: arquivos };
       default:
-        return { docs: filteredDocumentos, files: filteredArquivos };
+        return { docs: documentos, files: arquivos };
     }
   };
 
   const { docs, files } = getDisplayData();
+
+  // Calculate total items for pagination based on active tab
+  const getTotalItems = () => {
+    switch (activeTab) {
+      case 'documentos':
+        return totalDocs;
+      case 'arquivos':
+        return totalFiles;
+      default:
+        return totalDocs + totalFiles;
+    }
+  };
+
+  const hasActiveFilters = filters.searchTerm || filters.estado || filters.advancedFilters.length > 0;
+
+  // Pagination component to render at top and bottom
+  const PaginationControls = ({ position }: { position: 'top' | 'bottom' }) => (
+    <div className={`px-6 py-4 ${position === 'top' ? 'border-b' : 'border-t'} border-border-light dark:border-border-dark bg-background-light/50 dark:bg-background-dark/50`}>
+      <Pagination
+        currentPage={page}
+        totalItems={getTotalItems()}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        showItemCount={position === 'bottom'}
+      />
+    </div>
+  );
 
   return (
     <main className="container mx-auto px-6 py-8">
@@ -211,6 +313,17 @@ export function Dashboard() {
           </button>
         </div>
       </div>
+
+      {/* Error Alert */}
+      {error && (
+        <div className="bg-red-100 dark:bg-red-900/30 border border-red-400 dark:border-red-700 text-red-700 dark:text-red-400 px-4 py-3 rounded-lg mb-6 flex items-center gap-2">
+          <span className="material-icons-outlined">error</span>
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="ml-auto">
+            <span className="material-icons-outlined">close</span>
+          </button>
+        </div>
+      )}
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
@@ -251,29 +364,51 @@ export function Dashboard() {
           <div className="w-full lg:w-1/3 relative">
             <input
               type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              value={filters.searchTerm}
+              onChange={(e) => handleSearchChange(e.target.value)}
               placeholder="Buscar por Número do Documento..."
               className="w-full bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-light dark:text-text-dark rounded-full py-3 pl-5 pr-12 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-sm"
             />
-            <button className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-primary hover:bg-primary-hover text-white p-2 rounded-full transition-colors w-8 h-8 flex items-center justify-center">
+            <button
+              onClick={fetchData}
+              className="absolute right-2 top-1/2 transform -translate-y-1/2 bg-primary hover:bg-primary-hover text-white p-2 rounded-full transition-colors w-8 h-8 flex items-center justify-center"
+            >
               <span className="material-icons-outlined text-sm">search</span>
             </button>
           </div>
           <div className="flex flex-wrap gap-4 w-full lg:w-auto items-center">
-            <select className="appearance-none bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-muted-light dark:text-text-muted-dark py-2.5 px-5 pr-10 rounded-full text-sm focus:outline-none focus:border-primary cursor-pointer min-w-[160px]">
-              <option>Todos os Status</option>
-              <option>INWORK</option>
-              <option>RELEASED</option>
+            <select
+              value={filters.estado}
+              onChange={(e) => handleEstadoChange(e.target.value)}
+              className="appearance-none bg-background-light dark:bg-background-dark border border-border-light dark:border-border-dark text-text-muted-light dark:text-text-muted-dark py-2.5 px-5 pr-10 rounded-full text-sm focus:outline-none focus:border-primary cursor-pointer min-w-[160px]"
+            >
+              <option value="">Todos os Status</option>
+              <option value="INWORK">INWORK</option>
+              <option value="RELEASED">RELEASED</option>
             </select>
+
+            {hasActiveFilters && (
+              <button
+                onClick={clearAllFilters}
+                className="text-sm text-red-500 hover:text-red-700 flex items-center gap-1"
+              >
+                <span className="material-icons-outlined text-sm">clear</span>
+                Limpar Filtros
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-
-
-      {/* Advanced Filters */}
-      <div className="flex justify-end mb-4">
+      {/* Advanced Filters Toggle */}
+      <div className="flex justify-between items-center mb-4">
+        <div className="text-sm text-text-muted-light dark:text-text-muted-dark">
+          {hasActiveFilters && (
+            <span className="bg-primary/10 text-primary px-3 py-1 rounded-full">
+              {filters.advancedFilters.length} filtro(s) avançado(s) ativo(s)
+            </span>
+          )}
+        </div>
         <button
           onClick={() => setShowAdvancedFilter(!showAdvancedFilter)}
           className={`text-sm font-medium flex items-center gap-1 ${showAdvancedFilter ? 'text-primary' : 'text-text-muted-light'}`}
@@ -285,14 +420,11 @@ export function Dashboard() {
 
       {showAdvancedFilter && (
         <AdvancedFilter
-          onFilterChange={(filters) => {
-            setActiveFilters(filters);
-            setPage(1); // Reset page on filter
-          }}
+          onFilterChange={handleAdvancedFilterChange}
           onClose={() => setShowAdvancedFilter(false)}
+          initialFilters={filters.advancedFilters}
         />
-      )
-      }
+      )}
 
       {/* Table */}
       <div className="bg-surface-light dark:bg-surface-dark rounded-lg border border-border-light dark:border-border-dark overflow-hidden">
@@ -305,7 +437,7 @@ export function Dashboard() {
               : 'text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-white'
               }`}
           >
-            Todos
+            Todos ({totalDocs + totalFiles})
           </button>
           <button
             onClick={() => setActiveTab('documentos')}
@@ -314,7 +446,7 @@ export function Dashboard() {
               : 'text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-white'
               }`}
           >
-            Documentos ({documentos.length})
+            Documentos ({totalDocs})
           </button>
           <button
             onClick={() => setActiveTab('arquivos')}
@@ -323,9 +455,12 @@ export function Dashboard() {
               : 'text-text-muted-light dark:text-text-muted-dark hover:text-text-light dark:hover:text-white'
               }`}
           >
-            Arquivos ({arquivos.length})
+            Arquivos ({totalFiles})
           </button>
         </div>
+
+        {/* Top Pagination */}
+        <PaginationControls position="top" />
 
         {/* Table Content */}
         <div className="overflow-x-auto">
@@ -340,30 +475,8 @@ export function Dashboard() {
           />
         </div>
 
-        {/* Pagination */}
-        {/* Pagination */}<div className="px-6 py-4 border-t border-border-light dark:border-border-dark flex items-center justify-between bg-background-light/50 dark:bg-background-dark/50">
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-text-muted-light dark:text-text-muted-dark">
-              Página <span className="font-semibold text-text-light dark:text-white">{page}</span> (50 itens/pág)
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-4 py-2 text-sm font-medium rounded-md border border-border-light dark:border-border-dark hover:bg-background-light dark:hover:bg-background-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Anterior
-            </button>
-            <button
-              onClick={() => setPage(p => p + 1)}
-              disabled={docs.length + files.length < pageSize}
-              className="px-4 py-2 text-sm font-medium rounded-md border border-border-light dark:border-border-dark hover:bg-background-light dark:hover:bg-background-dark disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              Próxima
-            </button>
-          </div>
-        </div>
+        {/* Bottom Pagination */}
+        <PaginationControls position="bottom" />
       </div>
 
       {/* Import Modal */}

@@ -144,3 +144,43 @@ class ConfiguracoesResponse(BaseModel):
     destino_padrao: Optional[str] = None
     usar_padding_hex: bool = True
     adicionar_extensao_fv: bool = False
+
+
+# === Paginated Responses ===
+from typing import Generic, TypeVar
+from pydantic import BaseModel
+
+T = TypeVar('T')
+
+
+class PaginatedResponse(BaseModel):
+    """Resposta paginada genérica."""
+    items: List
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class DocumentosPaginados(BaseModel):
+    items: List[Documento]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class ArquivosPaginados(BaseModel):
+    items: List[Arquivo]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
+class LogsPaginados(BaseModel):
+    items: List[ETLLog]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int

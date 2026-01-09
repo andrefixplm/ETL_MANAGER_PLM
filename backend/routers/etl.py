@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import os
 import tempfile
-from database import get_db
+import uuid
+from datetime import datetime
+from database import get_db, SessionLocal
 from models import Documento, Arquivo, ETLLog
 from schemas import (
     ImportResponse,
@@ -24,21 +26,147 @@ from etl.transformer import (
 from etl.exporter import restaurar_arquivos, construir_caminho_real_vault
 from core.config_manager import obter_valor_configuracao
 
+# Armazenamento em memória do progresso das importações
+import_jobs: Dict[str, Dict[str, Any]] = {}
+
+# Constante para tamanho do lote
+BATCH_SIZE = 500
+
 router = APIRouter(
     tags=["etl"]
 )
+
+# === FUNÇÕES AUXILIARES DE PROCESSAMENTO EM LOTES ===
+
+def processar_lote_documentos(dados_lote: List[Dict], db: Session) -> int:
+    """Processa um lote de documentos e retorna quantidade inserida."""
+    inseridos = 0
+    for item in dados_lote:
+        doc_existente = db.query(Documento).filter(
+            Documento.numero_doc == item["documento"]["numero_doc"],
+            Documento.versao == item["documento"]["versao"],
+            Documento.iteracao == item["documento"]["iteracao"],
+        ).first()
+
+        if not doc_existente:
+            doc = Documento(**item["documento"])
+            db.add(doc)
+            db.flush()
+
+            if item["arquivo"]["nome_arquivo"]:
+                arq = Arquivo(documento_id=doc.id, **item["arquivo"])
+                db.add(arq)
+
+            inseridos += 1
+    return inseridos
+
+
+def processar_lote_arquivos(dados_lote: List[Dict], db: Session) -> int:
+    """Processa um lote de arquivos e retorna quantidade inserida."""
+    inseridos = 0
+    for item in dados_lote:
+        arq_existente = db.query(Arquivo).filter(
+            Arquivo.nome_hex == item.get("nome_hex"),
+            Arquivo.nome_original == item.get("nome_original"),
+        ).first()
+
+        if not arq_existente:
+            arq = Arquivo(**item)
+            db.add(arq)
+            inseridos += 1
+    return inseridos
+
+
+def executar_importacao_background(job_id: str, tmp_path: str, filename: str):
+    """Executa a importação em background com processamento em lotes."""
+    db = SessionLocal()
+
+    try:
+        import_jobs[job_id]["status"] = "processing"
+        import_jobs[job_id]["started_at"] = datetime.now().isoformat()
+
+        # Importa e transforma
+        df, formato = importar_arquivo(tmp_path)
+        tipo = identificar_tipo_dados(df)
+        df_transformado = transformar_dados(df, tipo)
+
+        import_jobs[job_id]["tipo"] = tipo
+        import_jobs[job_id]["formato"] = formato
+
+        registros_inseridos = 0
+
+        if tipo == "documentos":
+            dados = preparar_para_insercao_documentos(df_transformado)
+        elif tipo == "arquivos":
+            dados = preparar_para_insercao_arquivos(df_transformado)
+        else:
+            dados = []
+
+        total_registros = len(dados)
+        import_jobs[job_id]["total"] = total_registros
+
+        # Processa em lotes
+        for i in range(0, total_registros, BATCH_SIZE):
+            lote = dados[i:i + BATCH_SIZE]
+
+            if tipo == "documentos":
+                inseridos = processar_lote_documentos(lote, db)
+            else:
+                inseridos = processar_lote_arquivos(lote, db)
+
+            registros_inseridos += inseridos
+
+            # Commit do lote
+            db.commit()
+
+            # Atualiza progresso
+            import_jobs[job_id]["processed"] = min(i + BATCH_SIZE, total_registros)
+            import_jobs[job_id]["inserted"] = registros_inseridos
+            import_jobs[job_id]["progress"] = round((i + BATCH_SIZE) / total_registros * 100, 1)
+
+        # Log da operação
+        log = ETLLog(
+            tipo="import",
+            detalhes=f"Arquivo: {filename}, Formato: {formato}, Tipo: {tipo}",
+            registros_afetados=registros_inseridos,
+        )
+        db.add(log)
+        db.commit()
+
+        import_jobs[job_id]["status"] = "completed"
+        import_jobs[job_id]["inserted"] = registros_inseridos
+        import_jobs[job_id]["progress"] = 100
+        import_jobs[job_id]["log_id"] = log.id
+        import_jobs[job_id]["completed_at"] = datetime.now().isoformat()
+
+    except Exception as e:
+        db.rollback()
+        import_jobs[job_id]["status"] = "error"
+        import_jobs[job_id]["error"] = str(e)
+
+    finally:
+        db.close()
+        # Remove arquivo temporário
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
+
 
 # === ENDPOINTS DE IMPORTAÇÃO ===
 
 @router.post("/import", response_model=ImportResponse)
 async def importar_dados(
     file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+    async_mode: bool = Query(False, description="Executar em background para arquivos grandes"),
     db: Session = Depends(get_db)
 ):
     """
     Importa arquivo CSV, JSON ou MD para o banco de dados.
 
     O sistema detecta automaticamente se são dados de documentos ou arquivos CAD.
+
+    Parâmetros:
+    - async_mode: Se True, executa em background e retorna job_id para consulta de progresso
     """
     # Salva arquivo temporário
     suffix = os.path.splitext(file.filename)[1]
@@ -47,8 +175,36 @@ async def importar_dados(
         tmp.write(content)
         tmp_path = tmp.name
 
+    # Modo assíncrono para arquivos grandes
+    if async_mode and background_tasks:
+        job_id = str(uuid.uuid4())
+        import_jobs[job_id] = {
+            "status": "queued",
+            "filename": file.filename,
+            "progress": 0,
+            "total": 0,
+            "processed": 0,
+            "inserted": 0,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        background_tasks.add_task(
+            executar_importacao_background,
+            job_id,
+            tmp_path,
+            file.filename
+        )
+
+        return ImportResponse(
+            success=True,
+            message=f"Importação iniciada em background. Use GET /import/status/{job_id} para acompanhar.",
+            registros_importados=0,
+            log_id=None,
+            job_id=job_id,
+        )
+
+    # Modo síncrono com processamento em lotes
     try:
-        # Importa e transforma
         df, formato = importar_arquivo(tmp_path)
         tipo = identificar_tipo_dados(df)
         df_transformado = transformar_dados(df, tipo)
@@ -57,38 +213,23 @@ async def importar_dados(
 
         if tipo == "documentos":
             dados = preparar_para_insercao_documentos(df_transformado)
-            for item in dados:
-                # Verifica se documento já existe
-                doc_existente = db.query(Documento).filter(
-                    Documento.numero_doc == item["documento"]["numero_doc"],
-                    Documento.versao == item["documento"]["versao"],
-                    Documento.iteracao == item["documento"]["iteracao"],
-                ).first()
+            total = len(dados)
 
-                if not doc_existente:
-                    doc = Documento(**item["documento"])
-                    db.add(doc)
-                    db.flush()
-
-                    if item["arquivo"]["nome_arquivo"]:
-                        arq = Arquivo(documento_id=doc.id, **item["arquivo"])
-                        db.add(arq)
-
-                    registros_inseridos += 1
+            for i in range(0, total, BATCH_SIZE):
+                lote = dados[i:i + BATCH_SIZE]
+                inseridos = processar_lote_documentos(lote, db)
+                registros_inseridos += inseridos
+                db.commit()
 
         elif tipo == "arquivos":
             dados = preparar_para_insercao_arquivos(df_transformado)
-            for item in dados:
-                # Verifica duplicata
-                arq_existente = db.query(Arquivo).filter(
-                    Arquivo.nome_hex == item.get("nome_hex"),
-                    Arquivo.nome_original == item.get("nome_original"),
-                ).first()
+            total = len(dados)
 
-                if not arq_existente:
-                    arq = Arquivo(**item)
-                    db.add(arq)
-                    registros_inseridos += 1
+            for i in range(0, total, BATCH_SIZE):
+                lote = dados[i:i + BATCH_SIZE]
+                inseridos = processar_lote_arquivos(lote, db)
+                registros_inseridos += inseridos
+                db.commit()
 
         # Log da operação
         log = ETLLog(
@@ -112,6 +253,30 @@ async def importar_dados(
 
     finally:
         os.unlink(tmp_path)
+
+
+@router.get("/import/status/{job_id}")
+def status_importacao(job_id: str):
+    """
+    Retorna o status de uma importação em background.
+    """
+    if job_id not in import_jobs:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+
+    return import_jobs[job_id]
+
+
+@router.get("/import/jobs")
+def listar_jobs():
+    """
+    Lista todos os jobs de importação recentes.
+    """
+    return {
+        "jobs": [
+            {"job_id": k, **v}
+            for k, v in import_jobs.items()
+        ]
+    }
 
 
 # === ENDPOINTS DE RESTAURAÇÃO ===

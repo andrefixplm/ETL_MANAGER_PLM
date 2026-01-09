@@ -121,13 +121,43 @@ export const getLogs = (params?: {
   limit?: number;
 }) => api.get<ETLLog[]>('/logs', { params });
 
-export const importFile = (file: File) => {
+export interface ImportResponse {
+  success: boolean;
+  message: string;
+  registros_importados: number;
+  log_id: number | null;
+  job_id?: string;
+}
+
+export interface ImportJobStatus {
+  status: 'queued' | 'processing' | 'completed' | 'error';
+  filename: string;
+  progress: number;
+  total: number;
+  processed: number;
+  inserted: number;
+  tipo?: string;
+  formato?: string;
+  error?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  log_id?: number;
+}
+
+export const importFile = (file: File, asyncMode: boolean = false) => {
   const formData = new FormData();
   formData.append('file', file);
-  return api.post('/import', formData, {
+  return api.post<ImportResponse>(`/import?async_mode=${asyncMode}`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
 };
+
+export const getImportStatus = (jobId: string) =>
+  api.get<ImportJobStatus>(`/import/status/${jobId}`);
+
+export const getImportJobs = () =>
+  api.get<{ jobs: (ImportJobStatus & { job_id: string })[] }>('/import/jobs');
 
 export const restoreFiles = (arquivoIds: number[], destino: string) =>
   api.post<RestoreResponse>('/restore', {

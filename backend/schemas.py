@@ -89,7 +89,8 @@ class ImportResponse(BaseModel):
     success: bool
     message: str
     registros_importados: int
-    log_id: int
+    log_id: Optional[int] = None
+    job_id: Optional[str] = None  # Para importações em background
 
 
 class RestoreRequest(BaseModel):

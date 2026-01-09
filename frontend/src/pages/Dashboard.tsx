@@ -43,9 +43,15 @@ export function Dashboard() {
 
   // Build backend params from filters
   const buildFilterParams = useCallback((type: 'documentos' | 'arquivos') => {
+    // When showing "todos", split the limit between docs and files
+    const effectiveLimit = activeTab === 'todos' ? Math.floor(pageSize / 2) : pageSize;
+    const effectiveSkip = activeTab === 'todos'
+      ? Math.floor((page - 1) * pageSize / 2)
+      : (page - 1) * pageSize;
+
     const params: Record<string, string | number | undefined> = {
-      skip: (page - 1) * pageSize,
-      limit: pageSize
+      skip: effectiveSkip,
+      limit: effectiveLimit
     };
 
     // Basic search term
@@ -72,7 +78,8 @@ export function Dashboard() {
         'nome_original': { arq: 'nome_original' },
         'nome_interno_app': { arq: 'nome_interno' },
         'tipo_doc': { doc: 'nome_doc', arq: 'tipo_doc' },
-        'numero_doc': { doc: 'numero_doc' }
+        'numero_doc': { doc: 'numero_doc' },
+        'nome_hex': { arq: 'nome_hex' }
       };
 
       const mapping = fieldMapping[f.field];
@@ -85,7 +92,7 @@ export function Dashboard() {
     });
 
     return params;
-  }, [page, pageSize, filters]);
+  }, [page, pageSize, filters, activeTab]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);

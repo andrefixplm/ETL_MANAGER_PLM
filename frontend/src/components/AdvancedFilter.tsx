@@ -19,6 +19,7 @@ const FIELD_OPTIONS = [
     { value: 'nome_arquivo', label: 'Nome Arquivo', type: 'arquivo' },
     { value: 'nome_original', label: 'Nome Original', type: 'arquivo' },
     { value: 'nome_interno_app', label: 'Nome Interno', type: 'arquivo' },
+    { value: 'nome_hex', label: 'Nome Hex (Vault)', type: 'arquivo' },
     { value: 'tipo_doc', label: 'Tipo Documento', type: 'both' },
     { value: 'numero_doc', label: 'Número Documento', type: 'documento' },
 ];
